@@ -136,22 +136,6 @@ jobs:
           }
           Compress-Archive -Path (Join-Path $headerTemp '*') -DestinationPath $headerArchive
 
-      - name: Create or update tag
-        shell: pwsh
-        run: |
-          git config user.email "github-actions@users.noreply.github.com"
-          git config user.name "github-actions"
-
-          $tag = "v${{ steps.gitversion.outputs.SemVer }}"
-          git rev-parse -q --verify $tag 2>$null
-          if ($LASTEXITCODE -eq 0) {
-            Write-Host "Tag $tag already exists. Skipping push."
-            exit 0
-          }
-
-          git tag $tag
-          git push origin $tag
-
       - name: Create GitHub release
         uses: ncipollo/release-action@v1
         with:

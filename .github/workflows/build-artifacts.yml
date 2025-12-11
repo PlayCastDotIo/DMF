@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - master
+      - release
       - release/**
     tags:
       - 'v*'
@@ -57,7 +58,7 @@ jobs:
     name: Pack and Release
     runs-on: windows-2022
     needs: build
-    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+    if: ${{ github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/release') }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -102,12 +103,37 @@ jobs:
           }
           $null = New-Item $archivesRoot -ItemType Directory -Force
 
+          $targetOsList = $env:TARGET_OS_LIST.Split(',').Trim()
+          $configurationList = $env:CONFIGURATION_LIST.Split(',').Trim()
+          $platformList = $env:PLATFORM_LIST.Split(',').Trim()
+
+          foreach ($tos in $targetOsList) {
+            foreach ($platform in $platformList) {
+              foreach ($config in $configurationList) {
+                $expectedPath = Join-Path $env:BUILD_BINARIESDIRECTORY -ChildPath ("Bin_{0}_{1}_{2}" -f $tos, $platform, $config)
+                if (-not (Test-Path $expectedPath)) {
+                  throw "Missing build artifact: $expectedPath"
+                }
+              }
+            }
+          }
+
           Get-ChildItem -Path $env:BUILD_BINARIESDIRECTORY -Directory -Filter 'Bin_*' | ForEach-Object {
-            $zipPath = Join-Path $archivesRoot -ChildPath ("{0}.zip" -f $_.Name)
+            $platform = 'unknown'
+            if ($_.Name -match '^Bin_[^_]+_(?<platform>[^_]+)_[^_]+$') {
+              $platform = $matches['platform']
+            }
+
+            $platformRoot = Join-Path $archivesRoot -ChildPath $platform
+            if (-not (Test-Path $platformRoot)) {
+              $null = New-Item $platformRoot -ItemType Directory -Force
+            }
+
+            $zipPath = Join-Path $platformRoot -ChildPath ("{0}.zip" -f $_.Name)
             if (Test-Path $zipPath) {
               Remove-Item $zipPath -Force
             }
-            Compress-Archive -Path (Join-Path $_.FullName '*') -DestinationPath $zipPath
+            Compress-Archive -Path $_.FullName -DestinationPath $zipPath -Force
           }
 
       - name: Archive public headers
@@ -141,7 +167,8 @@ jobs:
         with:
           tag: v${{ steps.gitversion.outputs.SemVer }}
           name: DMF v${{ steps.gitversion.outputs.SemVer }}
-          artifacts: ".output/a/archives/*.zip,.output/a/*.nupkg"
+          commitish: ${{ github.sha }}
+          artifacts: ".output/a/archives/**/*.zip,.output/a/*.nupkg"
           artifactErrorsFailBuild: true
           generateReleaseNotes: true
           allowUpdates: true

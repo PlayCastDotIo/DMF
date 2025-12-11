@@ -21,11 +21,12 @@ $script:BinariesDirectory = if ([string]::IsNullOrEmpty($Env:BUILD_BINARIESDIREC
 $script:ArtifactsDirectory = if ([string]::IsNullOrEmpty($Env:BUILD_ARTIFACTSTAGINGDIRECTORY)) { "${SourcesDirectory}\.output\a" } else { $Env:BUILD_ARTIFACTSTAGINGDIRECTORY }
 
 $script:TARGETOS_URL = @{
-    '20H1' = 'https://devicesoss.z5.web.core.windows.net/ewdk/EWDK_vb_release_19041_191206-1406.iso'
-    '19H1' = 'https://devicesoss.z5.web.core.windows.net/ewdk/EWDK_19h1_release_svc_prod3_18362_190416-1111.iso'
-    'RS5' = 'https://devicesoss.z5.web.core.windows.net/ewdk/EWDK_rs5_release_svc_prod2_17763_190129-1747.iso'
-    'RS4' = 'https://devicesoss.z5.web.core.windows.net/ewdk/EWDK_rs4_release_svc_prod1_17134_180727-1807.iso'
-    'RS3' = 'https://devicesoss.z5.web.core.windows.net/ewdk/EWDK_rs3_release_svc_16299_180320-1852.iso'
+    # Public EWDK links from https://learn.microsoft.com/en-us/windows-hardware/drivers/download-the-wdk#download-icon-for-ewdk-enterprise-wdk-ewdk
+    '20H1' = 'https://go.microsoft.com/fwlink/p/?linkid=2128902' # Windows 10 2004 (19041)
+    '19H1' = 'https://go.microsoft.com/fwlink/p/?linkid=2086136' # Windows 10 1903 (18362)
+    'RS5' = 'https://go.microsoft.com/fwlink/?linkid=2070246&clcid=0x409' # Windows 10 1809 (17763)
+    'RS4' = 'https://go.microsoft.com/fwlink/?linkid=2008688&clcid=0x409' # Windows 10 1803 (17134)
+    'RS3' = 'https://go.microsoft.com/fwlink/?linkid=870959' # Windows 10 1709 (16299)
 }
 $script:CACHE_DIR = Join-Path $SourcesDirectory -ChildPath '.cache'
 

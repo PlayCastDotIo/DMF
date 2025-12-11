@@ -13,7 +13,7 @@ permissions:
   contents: write
 
 env:
-  TARGET_OS_LIST: '20H1,19H1'
+  TARGET_OS_LIST: '20H1'
   CONFIGURATION_LIST: 'Release,Debug'
   PLATFORM_LIST: 'x64,arm64'
   BUILD_BINARIESDIRECTORY: '${{ github.workspace }}\.output\b'
@@ -26,7 +26,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target_os: [20H1, 19H1]
+        target_os: [20H1]
         configuration: [Release, Debug]
         platform: [x64, arm64]
     steps:

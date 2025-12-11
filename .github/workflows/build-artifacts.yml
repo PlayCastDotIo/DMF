@@ -167,7 +167,7 @@ jobs:
         with:
           tag: v${{ steps.gitversion.outputs.SemVer }}
           name: DMF v${{ steps.gitversion.outputs.SemVer }}
-          commitish: ${{ github.sha }}
+          commit: ${{ github.sha }}
           artifacts: ".output/a/archives/**/*.zip,.output/a/*.nupkg"
           artifactErrorsFailBuild: true
           generateReleaseNotes: true

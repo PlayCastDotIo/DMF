@@ -112,16 +112,16 @@ jobs:
           if ($skippedArtifactFolders.Count -gt 0) {
             $details = ($skippedArtifactFolders | Sort-Object | ForEach-Object { " - $_" }) -join "`n"
             throw @"
-Unexpected artifact folder structure downloaded from run id $env:SOURCE_RUN_ID.
-Refusing to proceed because this can cause a partial/incomplete release.
+            Unexpected artifact folder structure downloaded from run id $env:SOURCE_RUN_ID.
+            Refusing to proceed because this can cause a partial/incomplete release.
 
-Each top-level downloaded artifact folder must either:
- - be named Bin_*; OR
- - contain exactly one direct child folder named Bin_*
+            Each top-level downloaded artifact folder must either:
+            - be named Bin_*; OR
+            - contain exactly one direct child folder named Bin_*
 
-Skipped artifact folder(s):
-$details
-"@
+            Skipped artifact folder(s):
+            $details
+            "@
           }
 
           $bins = Get-ChildItem -Path $destRoot -Directory -Filter 'Bin_*'

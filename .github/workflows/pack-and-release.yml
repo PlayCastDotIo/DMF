@@ -301,6 +301,7 @@ jobs:
       - name: Create GitHub release
         uses: ncipollo/release-action@b7eabc95ff50cbeeedec83973935c8f306dfcd0b
         with:
+          token: ${{ secrets.RELEASE_TOKEN }}
           tag: v${{ steps.gitversion.outputs.SemVer }}
           name: DMF v${{ steps.gitversion.outputs.SemVer }}
           commit: ${{ steps.source.outputs.head_sha }}

@@ -86,13 +86,127 @@ jobs:
       - name: Pack libraries and headers
         shell: pwsh
         run: |
-          $params = @{
-            Action = 'Pack'
-            TargetOS = '${{ env.TARGET_OS_LIST }}'
-            Configuration = '${{ env.CONFIGURATION_LIST }}'
-            Platform = '${{ env.PLATFORM_LIST }}'
+          $ErrorActionPreference = 'Stop'
+
+          # Resolve package version (prefer NuGet-friendly version when available).
+          $packageVersion = '${{ steps.gitversion.outputs.NuGetVersionV2 }}'
+          if ([string]::IsNullOrWhiteSpace($packageVersion)) {
+            $packageVersion = '${{ steps.gitversion.outputs.SemVer }}'
           }
-          ./build/build.ps1 @params
+          if ([string]::IsNullOrWhiteSpace($packageVersion)) {
+            throw 'Unable to determine package version from GitVersion outputs.'
+          }
+
+          # Create a redistributable include folder containing only public headers.
+          # Content:
+          # - Dmf/Framework/**.h
+          # - Dmf/Modules.Library/**.h
+          # - Dmf/Modules.Template/**.h
+          $includeRoot = Join-Path $env:BUILD_ARTIFACTSTAGINGDIRECTORY -ChildPath 'include'
+          if (Test-Path $includeRoot) {
+            Remove-Item $includeRoot -Recurse -Force
+          }
+          $null = New-Item $includeRoot -ItemType Directory -Force
+
+          $headerMaps = @(
+            @{
+              SourceRoot = Join-Path $env:GITHUB_WORKSPACE 'Dmf\Framework'
+              DestRoot   = Join-Path $includeRoot 'Dmf\Framework'
+            },
+            @{
+              SourceRoot = Join-Path $env:GITHUB_WORKSPACE 'Dmf\Modules.Library'
+              DestRoot   = Join-Path $includeRoot 'Dmf\Modules.Library'
+            },
+            @{
+              SourceRoot = Join-Path $env:GITHUB_WORKSPACE 'Dmf\Modules.Template'
+              DestRoot   = Join-Path $includeRoot 'Dmf\Modules.Template'
+            }
+          )
+
+          foreach ($map in $headerMaps) {
+            if (-not (Test-Path $map.SourceRoot)) {
+              throw "Header source directory not found: $($map.SourceRoot)"
+            }
+            Get-ChildItem -Path $map.SourceRoot -Recurse -File -Filter '*.h' | ForEach-Object {
+              $relative = $_.FullName.Substring($map.SourceRoot.Length).TrimStart('\', '/')
+              $destination = Join-Path $map.DestRoot $relative
+              $destDir = Split-Path $destination -Parent
+              if (-not (Test-Path $destDir)) {
+                $null = New-Item $destDir -ItemType Directory -Force
+              }
+              Copy-Item -Path $_.FullName -Destination $destination -Force
+            }
+          }
+
+          # Build NuGet packages from previously downloaded build artifacts (no rebuild).
+          $nugetExe = Join-Path $env:RUNNER_TEMP -ChildPath 'nuget.exe'
+          if (-not (Test-Path $nugetExe -PathType Leaf)) {
+            Write-Host "> Downloading latest nuget.exe"
+            Invoke-WebRequest -Uri 'https://dist.nuget.org/win-x86-commandline/latest/nuget.exe' -UseBasicParsing -OutFile $nugetExe
+          }
+
+          $targetOsList = $env:TARGET_OS_LIST.Split(',').Trim()
+          $configurationList = $env:CONFIGURATION_LIST.Split(',').Trim()
+          $platformList = $env:PLATFORM_LIST.Split(',').Trim()
+
+          foreach ($tos in $targetOsList) {
+            $packageName = "Microsoft.Library.DMF.$tos"
+            $packageDir = Join-Path $env:RUNNER_TEMP -ChildPath ("dmf-nuget-{0}" -f $tos)
+            if (Test-Path $packageDir) {
+              Remove-Item $packageDir -Recurse -Force
+            }
+            $null = New-Item $packageDir -ItemType Directory -Force
+
+            # Stage includes.
+            $packageIncDir = Join-Path $packageDir -ChildPath 'include'
+            $null = New-Item $packageIncDir -ItemType Directory -Force
+            Copy-Item -Path (Join-Path $includeRoot 'Dmf') -Destination (Join-Path $packageIncDir 'Dmf') -Recurse -Force
+
+            # Stage bin content.
+            foreach ($platform in $platformList) {
+              foreach ($config in $configurationList) {
+                $srcDropDir = Join-Path $env:BUILD_BINARIESDIRECTORY -ChildPath ("Bin_{0}_{1}_{2}" -f $tos, $platform, $config)
+                if (-not (Test-Path $srcDropDir)) {
+                  throw "Missing build artifact: $srcDropDir"
+                }
+
+                $packageDropDir = Join-Path $packageDir -ChildPath ("Drop_{0}_{1}_{2}" -f $tos, $platform, $config)
+                $null = New-Item (Join-Path $packageDropDir 'lib') -ItemType Directory -Force
+
+                Copy-Item -Path (Join-Path $srcDropDir 'lib\*') -Destination (Join-Path $packageDropDir 'lib') -Force -Recurse
+                Copy-Item -Path (Join-Path $srcDropDir 'sourceindexer-metadata.json') -Destination (Join-Path $packageDropDir 'sourceindexer-metadata.json') -Force
+              }
+            }
+
+            # Create nuspec and pack.
+            $nuspecPath = Join-Path $packageDir -ChildPath ("{0}.nuspec" -f $packageName)
+            $nuspecContent = @"
+<?xml version="1.0"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2011/08/nuspec.xsd">
+  <metadata>
+    <id>$packageName</id>
+    <version>$packageVersion</version>
+    <title>DMF library</title>
+    <authors>Microsoft</authors>
+    <licenseUrl>https://github.com/microsoft/DMF/blob/master/LICENSE</licenseUrl>
+    <projectUrl>https://github.com/microsoft/DMF</projectUrl>
+    <description>DMF library</description>
+    <summary></summary>
+    <copyright></copyright>
+  </metadata>
+</package>
+"@
+            $nuspecContent | Out-File -FilePath $nuspecPath -Encoding utf8 -Force
+
+            Write-Host "> Packing $packageName@$packageVersion"
+            & $nugetExe pack $nuspecPath `
+              -OutputDirectory $env:BUILD_ARTIFACTSTAGINGDIRECTORY `
+              -NoPackageAnalysis `
+              -NonInteractive
+            if ($LASTEXITCODE -ne 0) {
+              throw "nuget pack failed for $packageName (exitCode=$LASTEXITCODE)"
+            }
+          }
 
       - name: Archive library drops
         shell: pwsh
@@ -139,28 +253,32 @@ jobs:
       - name: Archive public headers
         shell: pwsh
         run: |
-          $headerSource = (Join-Path $env:GITHUB_WORKSPACE 'DMF').TrimEnd('\')
-          $headerTemp = Join-Path $env:RUNNER_TEMP 'dmf-headers'
-          if (Test-Path $headerTemp) {
-            Remove-Item $headerTemp -Recurse -Force
-          }
-          $null = New-Item $headerTemp -ItemType Directory -Force
+          $ErrorActionPreference = 'Stop'
 
-          Get-ChildItem -Path $headerSource -Recurse -File -Filter '*.h' | ForEach-Object {
-            $relative = $_.FullName.Substring($headerSource.Length).TrimStart('\', '/')
-            $destination = Join-Path $headerTemp $relative
-            $destDir = Split-Path $destination -Parent
-            if (-not (Test-Path $destDir)) {
-              $null = New-Item $destDir -ItemType Directory -Force
-            }
-            Copy-Item -Path $_.FullName -Destination $destination -Force
+          $archivesRoot = Join-Path $env:BUILD_ARTIFACTSTAGINGDIRECTORY -ChildPath 'archives'
+          if (-not (Test-Path $archivesRoot)) {
+            $null = New-Item $archivesRoot -ItemType Directory -Force
           }
 
-          $headerArchive = Join-Path (Join-Path $env:BUILD_ARTIFACTSTAGINGDIRECTORY 'archives') 'DMF-Headers.zip'
+          # Zip the staged redistributable include folder (rooted at include/).
+          $includeRoot = Join-Path $env:BUILD_ARTIFACTSTAGINGDIRECTORY -ChildPath 'include'
+          if (-not (Test-Path $includeRoot)) {
+            throw "Missing staged include folder: $includeRoot"
+          }
+
+          $tempRoot = Join-Path $env:RUNNER_TEMP 'dmf-include-zip'
+          if (Test-Path $tempRoot) {
+            Remove-Item $tempRoot -Recurse -Force
+          }
+          $tempInclude = Join-Path $tempRoot 'include'
+          $null = New-Item $tempInclude -ItemType Directory -Force
+          Copy-Item -Path (Join-Path $includeRoot 'Dmf') -Destination (Join-Path $tempInclude 'Dmf') -Recurse -Force
+
+          $headerArchive = Join-Path $archivesRoot 'DMF-Headers.zip'
           if (Test-Path $headerArchive) {
             Remove-Item $headerArchive -Force
           }
-          Compress-Archive -Path (Join-Path $headerTemp '*') -DestinationPath $headerArchive
+          Compress-Archive -Path $tempInclude -DestinationPath $headerArchive -Force
 
       - name: Create GitHub release
         uses: ncipollo/release-action@v1

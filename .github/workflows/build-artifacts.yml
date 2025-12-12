@@ -86,13 +86,48 @@ jobs:
       - name: Pack libraries and headers
         shell: pwsh
         run: |
-          $params = @{
-            Action = 'Pack'
-            TargetOS = '${{ env.TARGET_OS_LIST }}'
-            Configuration = '${{ env.CONFIGURATION_LIST }}'
-            Platform = '${{ env.PLATFORM_LIST }}'
+          $ErrorActionPreference = 'Stop'
+
+          # Create a redistributable include folder containing only public headers.
+          # Content:
+          # - Dmf/Framework/**.h
+          # - Dmf/Modules.Library/**.h
+          # - Dmf/Modules.Template/**.h
+          $includeRoot = Join-Path $env:BUILD_ARTIFACTSTAGINGDIRECTORY -ChildPath 'include'
+          if (Test-Path $includeRoot) {
+            Remove-Item $includeRoot -Recurse -Force
           }
-          ./build/build.ps1 @params
+          $null = New-Item $includeRoot -ItemType Directory -Force
+
+          $headerMaps = @(
+            @{
+              SourceRoot = Join-Path $env:GITHUB_WORKSPACE 'Dmf\Framework'
+              DestRoot   = Join-Path $includeRoot 'Dmf\Framework'
+            },
+            @{
+              SourceRoot = Join-Path $env:GITHUB_WORKSPACE 'Dmf\Modules.Library'
+              DestRoot   = Join-Path $includeRoot 'Dmf\Modules.Library'
+            },
+            @{
+              SourceRoot = Join-Path $env:GITHUB_WORKSPACE 'Dmf\Modules.Template'
+              DestRoot   = Join-Path $includeRoot 'Dmf\Modules.Template'
+            }
+          )
+
+          foreach ($map in $headerMaps) {
+            if (-not (Test-Path $map.SourceRoot)) {
+              throw "Header source directory not found: $($map.SourceRoot)"
+            }
+            Get-ChildItem -Path $map.SourceRoot -Recurse -File -Filter '*.h' | ForEach-Object {
+              $relative = $_.FullName.Substring($map.SourceRoot.Length).TrimStart('\', '/')
+              $destination = Join-Path $map.DestRoot $relative
+              $destDir = Split-Path $destination -Parent
+              if (-not (Test-Path $destDir)) {
+                $null = New-Item $destDir -ItemType Directory -Force
+              }
+              Copy-Item -Path $_.FullName -Destination $destination -Force
+            }
+          }
 
       - name: Archive library drops
         shell: pwsh
@@ -118,6 +153,12 @@ jobs:
             }
           }
 
+          $tempRoot = Join-Path $env:RUNNER_TEMP 'dmf-libs'
+          if (Test-Path $tempRoot) {
+            Remove-Item $tempRoot -Recurse -Force
+          }
+          $null = New-Item $tempRoot -ItemType Directory -Force
+
           Get-ChildItem -Path $env:BUILD_BINARIESDIRECTORY -Directory -Filter 'Bin_*' | ForEach-Object {
             $platform = 'unknown'
             if ($_.Name -match '^Bin_[^_]+_(?<platform>[^_]+)_[^_]+$') {
@@ -129,38 +170,71 @@ jobs:
               $null = New-Item $platformRoot -ItemType Directory -Force
             }
 
-            $zipPath = Join-Path $platformRoot -ChildPath ("{0}.zip" -f $_.Name)
+            # Copy only *.lib files (not the full drop) preserving folder structure under lib/.
+            $libSource = Join-Path $_.FullName 'lib'
+            if (-not (Test-Path $libSource)) {
+              throw "Missing lib folder in build artifact: $libSource"
+            }
+
+            $stagingRoot = Join-Path $tempRoot $_.Name
+            if (Test-Path $stagingRoot) {
+              Remove-Item $stagingRoot -Recurse -Force
+            }
+            $null = New-Item (Join-Path $stagingRoot 'lib') -ItemType Directory -Force
+
+            $libFiles = Get-ChildItem -Path $libSource -Recurse -File -Filter '*.lib'
+            if ($null -eq $libFiles -or $libFiles.Count -eq 0) {
+              throw "No .lib files found under: $libSource"
+            }
+
+            $libFiles | ForEach-Object {
+              $relative = $_.FullName.Substring($libSource.Length).TrimStart('\', '/')
+              $destination = Join-Path (Join-Path $stagingRoot 'lib') $relative
+              $destDir = Split-Path $destination -Parent
+              if (-not (Test-Path $destDir)) {
+                $null = New-Item $destDir -ItemType Directory -Force
+              }
+              Copy-Item -Path $_.FullName -Destination $destination -Force
+            }
+
+            $zipPath = Join-Path $platformRoot -ChildPath ("{0}_libs.zip" -f $_.Name)
             if (Test-Path $zipPath) {
               Remove-Item $zipPath -Force
             }
-            Compress-Archive -Path $_.FullName -DestinationPath $zipPath -Force
+            # Archive with a top-level folder (Bin_<TargetOS>_<arch>_<config>/...) so extracted
+            # content retains the build architecture in its path.
+            Compress-Archive -Path $stagingRoot -DestinationPath $zipPath -Force
           }
 
       - name: Archive public headers
         shell: pwsh
         run: |
-          $headerSource = (Join-Path $env:GITHUB_WORKSPACE 'DMF').TrimEnd('\')
-          $headerTemp = Join-Path $env:RUNNER_TEMP 'dmf-headers'
-          if (Test-Path $headerTemp) {
-            Remove-Item $headerTemp -Recurse -Force
-          }
-          $null = New-Item $headerTemp -ItemType Directory -Force
+          $ErrorActionPreference = 'Stop'
 
-          Get-ChildItem -Path $headerSource -Recurse -File -Filter '*.h' | ForEach-Object {
-            $relative = $_.FullName.Substring($headerSource.Length).TrimStart('\', '/')
-            $destination = Join-Path $headerTemp $relative
-            $destDir = Split-Path $destination -Parent
-            if (-not (Test-Path $destDir)) {
-              $null = New-Item $destDir -ItemType Directory -Force
-            }
-            Copy-Item -Path $_.FullName -Destination $destination -Force
+          $archivesRoot = Join-Path $env:BUILD_ARTIFACTSTAGINGDIRECTORY -ChildPath 'archives'
+          if (-not (Test-Path $archivesRoot)) {
+            $null = New-Item $archivesRoot -ItemType Directory -Force
           }
 
-          $headerArchive = Join-Path (Join-Path $env:BUILD_ARTIFACTSTAGINGDIRECTORY 'archives') 'DMF-Headers.zip'
+          # Zip the staged redistributable include folder (rooted at include/).
+          $includeRoot = Join-Path $env:BUILD_ARTIFACTSTAGINGDIRECTORY -ChildPath 'include'
+          if (-not (Test-Path $includeRoot)) {
+            throw "Missing staged include folder: $includeRoot"
+          }
+
+          $tempRoot = Join-Path $env:RUNNER_TEMP 'dmf-include-zip'
+          if (Test-Path $tempRoot) {
+            Remove-Item $tempRoot -Recurse -Force
+          }
+          $tempInclude = Join-Path $tempRoot 'include'
+          $null = New-Item $tempInclude -ItemType Directory -Force
+          Copy-Item -Path (Join-Path $includeRoot 'Dmf') -Destination (Join-Path $tempInclude 'Dmf') -Recurse -Force
+
+          $headerArchive = Join-Path $archivesRoot 'DMF-Headers.zip'
           if (Test-Path $headerArchive) {
             Remove-Item $headerArchive -Force
           }
-          Compress-Archive -Path (Join-Path $headerTemp '*') -DestinationPath $headerArchive
+          Compress-Archive -Path $tempInclude -DestinationPath $headerArchive -Force
 
       - name: Create GitHub release
         uses: ncipollo/release-action@v1
@@ -168,7 +242,7 @@ jobs:
           tag: v${{ steps.gitversion.outputs.SemVer }}
           name: DMF v${{ steps.gitversion.outputs.SemVer }}
           commit: ${{ github.sha }}
-          artifacts: ".output/a/archives/**/*.zip,.output/a/*.nupkg"
+          artifacts: ".output/a/archives/**/*.zip"
           artifactErrorsFailBuild: true
           generateReleaseNotes: true
           allowUpdates: true

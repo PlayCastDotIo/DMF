@@ -1,0 +1,308 @@
+name: Pack and Release (from prior build artifacts)
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'Workflow run id (from Build and Release DMF) to pull artifacts from'
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+
+env:
+  TARGET_OS_LIST: '20H1'
+  CONFIGURATION_LIST: 'Release,Debug'
+  PLATFORM_LIST: 'x64,arm64'
+  BUILD_BINARIESDIRECTORY: '${{ github.workspace }}\.output\b'
+  BUILD_ARTIFACTSTAGINGDIRECTORY: '${{ github.workspace }}\.output\a'
+
+jobs:
+  pack-and-release:
+    name: Pack and Release
+    runs-on: windows-2022
+    steps:
+      - name: Resolve source run and validate success
+        id: source
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ inputs.run_id }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          if ([string]::IsNullOrWhiteSpace($env:SOURCE_RUN_ID)) {
+            throw "Input 'run_id' is required."
+          }
+          if ($env:SOURCE_RUN_ID -notmatch '^\d+$') {
+            throw "Input 'run_id' must be a numeric workflow run id."
+          }
+
+          $run = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$($env:SOURCE_RUN_ID)" | ConvertFrom-Json
+
+          if ($run.status -ne 'completed') {
+            throw "Source run is not completed. status=$($run.status)"
+          }
+          if ($run.conclusion -ne 'success') {
+            throw "Source run did not succeed. conclusion=$($run.conclusion)"
+          }
+
+          "head_sha=$($run.head_sha)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "head_branch=$($run.head_branch)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "workflow_name=$($run.name)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Checkout source commit
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          fetch-depth: 0
+          ref: ${{ steps.source.outputs.head_sha }}
+
+      - name: Download build artifacts from source run
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ inputs.run_id }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $downloadRoot = Join-Path $env:RUNNER_TEMP 'source-run-artifacts'
+          if (Test-Path $downloadRoot) {
+            Remove-Item $downloadRoot -Recurse -Force
+          }
+          $null = New-Item $downloadRoot -ItemType Directory -Force
+
+          $destRoot = $env:BUILD_BINARIESDIRECTORY
+          if (Test-Path $destRoot) {
+            Remove-Item $destRoot -Recurse -Force
+          }
+          $null = New-Item $destRoot -ItemType Directory -Force
+
+          gh run download $env:SOURCE_RUN_ID --repo $env:GITHUB_REPOSITORY --dir $downloadRoot
+
+          # Flatten artifacts so we end up with:
+          #   .output\b\Bin_<TargetOS>_<arch>_<config>\...
+          # regardless of whether 'gh run download' created one extra directory layer.
+          $artifactFolders = Get-ChildItem -Path $downloadRoot -Directory
+          if ($null -eq $artifactFolders -or $artifactFolders.Count -eq 0) {
+            throw "No artifacts were downloaded from run id $env:SOURCE_RUN_ID."
+          }
+
+          $skippedArtifactFolders = @()
+          foreach ($artifact in $artifactFolders) {
+            if ($artifact.Name -like 'Bin_*') {
+              $target = Join-Path $destRoot $artifact.Name
+              if (Test-Path $target) { Remove-Item $target -Recurse -Force }
+              Move-Item -Path $artifact.FullName -Destination $target
+              continue
+            }
+
+            $inner = Get-ChildItem -Path $artifact.FullName -Directory -Filter 'Bin_*'
+            if ($inner.Count -eq 1) {
+              $target = Join-Path $destRoot $inner[0].Name
+              if (Test-Path $target) { Remove-Item $target -Recurse -Force }
+              Move-Item -Path $inner[0].FullName -Destination $target
+              continue
+            }
+
+            $skippedArtifactFolders += $artifact.FullName
+          }
+
+          if ($skippedArtifactFolders.Count -gt 0) {
+            $details = ($skippedArtifactFolders | Sort-Object | ForEach-Object { " - $_" }) -join "`n"
+            throw @"
+Unexpected artifact folder structure downloaded from run id $env:SOURCE_RUN_ID.
+Refusing to proceed because this can cause a partial/incomplete release.
+
+Each top-level downloaded artifact folder must either:
+ - be named Bin_*; OR
+ - contain exactly one direct child folder named Bin_*
+
+Skipped artifact folder(s):
+$details
+"@
+          }
+
+          $bins = Get-ChildItem -Path $destRoot -Directory -Filter 'Bin_*'
+          if ($null -eq $bins -or $bins.Count -eq 0) {
+            throw "After flattening, no Bin_* directories were found under: $destRoot"
+          }
+
+      - name: Install GitVersion
+        uses: gittools/actions/gitversion/setup@dcb17efb49ec7f20efdebce79cc397a3952c63db
+        with:
+          versionSpec: '5.x'
+
+      - name: Determine semantic version
+        id: gitversion
+        uses: gittools/actions/gitversion/execute@dcb17efb49ec7f20efdebce79cc397a3952c63db
+        with:
+          useConfigFile: true
+          configFilePath: build/GitVersion.yml
+
+      - name: Pack libraries and headers
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          # Create a redistributable include folder containing only public headers.
+          # Content:
+          # - Dmf/Framework/**.h
+          # - Dmf/Modules.Library/**.h
+          # - Dmf/Modules.Template/**.h
+          $includeRoot = Join-Path $env:BUILD_ARTIFACTSTAGINGDIRECTORY -ChildPath 'include'
+          if (Test-Path $includeRoot) {
+            Remove-Item $includeRoot -Recurse -Force
+          }
+          $null = New-Item $includeRoot -ItemType Directory -Force
+
+          $headerMaps = @(
+            @{
+              SourceRoot = Join-Path $env:GITHUB_WORKSPACE 'Dmf\Framework'
+              DestRoot   = Join-Path $includeRoot 'Dmf\Framework'
+            },
+            @{
+              SourceRoot = Join-Path $env:GITHUB_WORKSPACE 'Dmf\Modules.Library'
+              DestRoot   = Join-Path $includeRoot 'Dmf\Modules.Library'
+            },
+            @{
+              SourceRoot = Join-Path $env:GITHUB_WORKSPACE 'Dmf\Modules.Template'
+              DestRoot   = Join-Path $includeRoot 'Dmf\Modules.Template'
+            }
+          )
+
+          foreach ($map in $headerMaps) {
+            if (-not (Test-Path $map.SourceRoot)) {
+              throw "Header source directory not found: $($map.SourceRoot)"
+            }
+            Get-ChildItem -Path $map.SourceRoot -Recurse -File -Filter '*.h' | ForEach-Object {
+              $relative = $_.FullName.Substring($map.SourceRoot.Length).TrimStart('\', '/')
+              $destination = Join-Path $map.DestRoot $relative
+              $destDir = Split-Path $destination -Parent
+              if (-not (Test-Path $destDir)) {
+                $null = New-Item $destDir -ItemType Directory -Force
+              }
+              Copy-Item -Path $_.FullName -Destination $destination -Force
+            }
+          }
+
+      - name: Archive library drops
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $archivesRoot = Join-Path $env:BUILD_ARTIFACTSTAGINGDIRECTORY -ChildPath 'archives'
+          if (Test-Path $archivesRoot) {
+            Remove-Item $archivesRoot -Recurse -Force
+          }
+          $null = New-Item $archivesRoot -ItemType Directory -Force
+
+          $targetOsList = $env:TARGET_OS_LIST.Split(',').Trim()
+          $configurationList = $env:CONFIGURATION_LIST.Split(',').Trim()
+          $platformList = $env:PLATFORM_LIST.Split(',').Trim()
+
+          foreach ($tos in $targetOsList) {
+            foreach ($platform in $platformList) {
+              foreach ($config in $configurationList) {
+                $expectedPath = Join-Path $env:BUILD_BINARIESDIRECTORY -ChildPath ("Bin_{0}_{1}_{2}" -f $tos, $platform, $config)
+                if (-not (Test-Path $expectedPath)) {
+                  throw "Missing build artifact: $expectedPath"
+                }
+              }
+            }
+          }
+
+          $tempRoot = Join-Path $env:RUNNER_TEMP 'dmf-libs'
+          if (Test-Path $tempRoot) {
+            Remove-Item $tempRoot -Recurse -Force
+          }
+          $null = New-Item $tempRoot -ItemType Directory -Force
+
+          Get-ChildItem -Path $env:BUILD_BINARIESDIRECTORY -Directory -Filter 'Bin_*' | ForEach-Object {
+            if ($_.Name -notmatch '^Bin_[^_]+_(?<platform>[^_]+)_[^_]+$') {
+              throw "Malformed build artifact folder name '$($_.Name)'. Expected pattern: Bin_<TargetOS>_<arch>_<config>"
+            }
+            $platform = $matches['platform']
+
+            $platformRoot = Join-Path $archivesRoot -ChildPath $platform
+            if (-not (Test-Path $platformRoot)) {
+              $null = New-Item $platformRoot -ItemType Directory -Force
+            }
+
+            # Copy only *.lib files (not the full drop) preserving folder structure under lib/.
+            $libSource = Join-Path $_.FullName 'lib'
+            if (-not (Test-Path $libSource)) {
+              throw "Missing lib folder in build artifact: $libSource"
+            }
+
+            $stagingRoot = Join-Path $tempRoot $_.Name
+            if (Test-Path $stagingRoot) {
+              Remove-Item $stagingRoot -Recurse -Force
+            }
+            $null = New-Item (Join-Path $stagingRoot 'lib') -ItemType Directory -Force
+
+            $libFiles = Get-ChildItem -Path $libSource -Recurse -File -Filter '*.lib'
+            if ($null -eq $libFiles -or $libFiles.Count -eq 0) {
+              throw "No .lib files found under: $libSource"
+            }
+
+            $libFiles | ForEach-Object {
+              $relative = $_.FullName.Substring($libSource.Length).TrimStart('\', '/')
+              $destination = Join-Path (Join-Path $stagingRoot 'lib') $relative
+              $destDir = Split-Path $destination -Parent
+              if (-not (Test-Path $destDir)) {
+                $null = New-Item $destDir -ItemType Directory -Force
+              }
+              Copy-Item -Path $_.FullName -Destination $destination -Force
+            }
+
+            $zipPath = Join-Path $platformRoot -ChildPath ("{0}_libs.zip" -f $_.Name)
+            if (Test-Path $zipPath) {
+              Remove-Item $zipPath -Force
+            }
+            # Archive with a top-level folder (Bin_<TargetOS>_<arch>_<config>/...) so extracted
+            # content retains the build architecture in its path.
+            Compress-Archive -Path $stagingRoot -DestinationPath $zipPath -Force
+          }
+
+      - name: Archive public headers
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $archivesRoot = Join-Path $env:BUILD_ARTIFACTSTAGINGDIRECTORY -ChildPath 'archives'
+          if (-not (Test-Path $archivesRoot)) {
+            $null = New-Item $archivesRoot -ItemType Directory -Force
+          }
+
+          # Zip the staged redistributable include folder (rooted at include/).
+          $includeRoot = Join-Path $env:BUILD_ARTIFACTSTAGINGDIRECTORY -ChildPath 'include'
+          if (-not (Test-Path $includeRoot)) {
+            throw "Missing staged include folder: $includeRoot"
+          }
+
+          $tempRoot = Join-Path $env:RUNNER_TEMP 'dmf-include-zip'
+          if (Test-Path $tempRoot) {
+            Remove-Item $tempRoot -Recurse -Force
+          }
+          $tempInclude = Join-Path $tempRoot 'include'
+          $null = New-Item $tempInclude -ItemType Directory -Force
+          Copy-Item -Path (Join-Path $includeRoot 'Dmf') -Destination (Join-Path $tempInclude 'Dmf') -Recurse -Force
+
+          $headerArchive = Join-Path $archivesRoot 'DMF-Headers.zip'
+          if (Test-Path $headerArchive) {
+            Remove-Item $headerArchive -Force
+          }
+          Compress-Archive -Path $tempInclude -DestinationPath $headerArchive -Force
+
+      - name: Create GitHub release
+        uses: ncipollo/release-action@b7eabc95ff50cbeeedec83973935c8f306dfcd0b
+        with:
+          tag: v${{ steps.gitversion.outputs.SemVer }}
+          name: DMF v${{ steps.gitversion.outputs.SemVer }}
+          commit: ${{ steps.source.outputs.head_sha }}
+          artifacts: ".output/a/archives/**/*.zip"
+          artifactErrorsFailBuild: true
+          generateReleaseNotes: true
+          allowUpdates: true

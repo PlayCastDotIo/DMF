@@ -220,10 +220,10 @@ $details
           $null = New-Item $tempRoot -ItemType Directory -Force
 
           Get-ChildItem -Path $env:BUILD_BINARIESDIRECTORY -Directory -Filter 'Bin_*' | ForEach-Object {
-            $platform = 'unknown'
-            if ($_.Name -match '^Bin_[^_]+_(?<platform>[^_]+)_[^_]+$') {
-              $platform = $matches['platform']
+            if ($_.Name -notmatch '^Bin_[^_]+_(?<platform>[^_]+)_[^_]+$') {
+              throw "Malformed build artifact folder name '$($_.Name)'. Expected pattern: Bin_<TargetOS>_<arch>_<config>"
             }
+            $platform = $matches['platform']
 
             $platformRoot = Join-Path $archivesRoot -ChildPath $platform
             if (-not (Test-Path $platformRoot)) {

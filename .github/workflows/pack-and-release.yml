@@ -89,6 +89,7 @@ jobs:
             throw "No artifacts were downloaded from run id $env:SOURCE_RUN_ID."
           }
 
+          $skippedArtifactFolders = @()
           foreach ($artifact in $artifactFolders) {
             if ($artifact.Name -like 'Bin_*') {
               $target = Join-Path $destRoot $artifact.Name
@@ -105,7 +106,22 @@ jobs:
               continue
             }
 
-            Write-Host "Skipping artifact folder (not Bin_* and no single Bin_* child): $($artifact.FullName)"
+            $skippedArtifactFolders += $artifact.FullName
+          }
+
+          if ($skippedArtifactFolders.Count -gt 0) {
+            $details = ($skippedArtifactFolders | Sort-Object | ForEach-Object { " - $_" }) -join "`n"
+            throw @"
+Unexpected artifact folder structure downloaded from run id $env:SOURCE_RUN_ID.
+Refusing to proceed because this can cause a partial/incomplete release.
+
+Each top-level downloaded artifact folder must either:
+ - be named Bin_*; OR
+ - contain exactly one direct child folder named Bin_*
+
+Skipped artifact folder(s):
+$details
+"@
           }
 
           $bins = Get-ChildItem -Path $destRoot -Directory -Filter 'Bin_*'

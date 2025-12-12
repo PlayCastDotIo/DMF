@@ -201,7 +201,9 @@ jobs:
             if (Test-Path $zipPath) {
               Remove-Item $zipPath -Force
             }
-            Compress-Archive -Path (Join-Path $stagingRoot '*') -DestinationPath $zipPath -Force
+            # Archive with a top-level folder (Bin_<TargetOS>_<arch>_<config>/...) so extracted
+            # content retains the build architecture in its path.
+            Compress-Archive -Path $stagingRoot -DestinationPath $zipPath -Force
           }
 
       - name: Archive public headers

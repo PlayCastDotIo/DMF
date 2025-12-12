@@ -29,7 +29,7 @@ jobs:
         platform: [x64, arm64]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           fetch-depth: 0
 
@@ -44,7 +44,7 @@ jobs:
           ./build/build.ps1 @params
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: Bin_${{ matrix.target_os }}_${{ matrix.platform }}_${{ matrix.configuration }}
           path: ./.output/b/Bin_${{ matrix.target_os }}_${{ matrix.platform }}_${{ matrix.configuration }}

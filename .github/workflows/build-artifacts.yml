@@ -8,7 +8,6 @@ on:
       - release/**
     tags:
       - 'v*'
-  workflow_dispatch:
 
 env:
   TARGET_OS_LIST: '20H1'

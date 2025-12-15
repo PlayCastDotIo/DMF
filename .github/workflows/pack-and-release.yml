@@ -150,6 +150,7 @@ jobs:
 
           # Create a redistributable include folder containing only public headers.
           # Content:
+          # - Dmf/*.h
           # - Dmf/Framework/**.h
           # - Dmf/Modules.Library/**.h
           # - Dmf/Modules.Template/**.h
@@ -158,6 +159,17 @@ jobs:
             Remove-Item $includeRoot -Recurse -Force
           }
           $null = New-Item $includeRoot -ItemType Directory -Force
+
+          # Root DMF headers (non-recursive). These are part of the public surface area
+          # and must be present in the redistributable include zip.
+          $dmfRoot = Join-Path $env:GITHUB_WORKSPACE 'Dmf'
+          if (-not (Test-Path $dmfRoot)) {
+            throw "DMF root directory not found: $dmfRoot"
+          }
+          $null = New-Item (Join-Path $includeRoot 'Dmf') -ItemType Directory -Force
+          Get-ChildItem -Path $dmfRoot -File -Filter '*.h' | ForEach-Object {
+            Copy-Item -Path $_.FullName -Destination (Join-Path (Join-Path $includeRoot 'Dmf') $_.Name) -Force
+          }
 
           $headerMaps = @(
             @{

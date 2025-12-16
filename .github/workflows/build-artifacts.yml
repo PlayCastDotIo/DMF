@@ -10,7 +10,7 @@ on:
       - 'v*'
 
 env:
-  TARGET_OS_LIST: '20H1,10.0.26100.0'
+  TARGET_OS_LIST: '20H1,24H2'
   CONFIGURATION_LIST: 'Release,Debug'
   PLATFORM_LIST: 'x64,arm64'
   BUILD_BINARIESDIRECTORY: '${{ github.workspace }}\.output\b'
@@ -23,7 +23,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target_os: [20H1, '10.0.26100.0']
+        target_os: [20H1, 24H2]
         configuration: [Release, Debug]
         platform: [x64, arm64]
     steps:

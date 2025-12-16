@@ -22,7 +22,7 @@ $script:ArtifactsDirectory = if ([string]::IsNullOrEmpty($Env:BUILD_ARTIFACTSTAG
 
 $script:TARGETOS_URL = @{
     # Public EWDK links from https://learn.microsoft.com/en-us/windows-hardware/drivers/download-the-wdk#download-icon-for-ewdk-enterprise-wdk-ewdk
-    '10.0.26100.0' = 'https://go.microsoft.com/fwlink/?linkid=2335681' # Windows 11 (26100) EWDK
+    '24H2' = 'https://go.microsoft.com/fwlink/?linkid=2335681' # Windows 11 24H2 (26100) EWDK
     '20H1' = 'https://go.microsoft.com/fwlink/p/?linkid=2128902' # Windows 10 2004 (19041)
     '19H1' = 'https://go.microsoft.com/fwlink/p/?linkid=2086136' # Windows 10 1903 (18362)
     'RS5' = 'https://go.microsoft.com/fwlink/?linkid=2070246&clcid=0x409' # Windows 10 1809 (17763)

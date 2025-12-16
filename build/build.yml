@@ -35,7 +35,7 @@ stages:
             ${{ each t in parameters.TargetOS }}:
               ${{ each c in parameters.Configuration }}:
                 ${{ each p in parameters.Platform }}:
-                  ${{ replace(t, '.', '_') }}_${{c}}_${{p}}:
+                  ${{t}}_${{c}}_${{p}}:
                     TargetOS: ${{t}}
                     Platform: ${{p}}
                     Configuration: ${{c}}

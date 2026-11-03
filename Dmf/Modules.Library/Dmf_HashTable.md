@@ -378,6 +378,8 @@ ValueLength | The Length of the Value in bytes.
 
 #### Module Implementation Details
 
+See [removal and lookup without insertion](Dmf_HashTable.Removal.md) for the additional methods and lifetime contracts.
+
 -----------------------------------------------------------------------------------------------------------------------------------
 
 #### Examples

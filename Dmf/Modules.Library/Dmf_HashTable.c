@@ -1242,5 +1242,7 @@ Exit:
     return ntStatus;
 }
 
+#include "Dmf_HashTable.Operations.h"
+
 // eof: Dmf_HashTable.c
 //

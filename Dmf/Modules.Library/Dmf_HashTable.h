@@ -73,6 +73,22 @@ EVT_DMF_HashTable_Enumerate(_In_ DMFMODULE DmfModule,
                             _In_ VOID* CallbackContext);
 
 // Client uses this structure to configure the Module specific parameters.
+// Predicate invoked under the table lock before removing an existing entry.
+// FALSE preserves the entry and returns NOT_FOUND (no matching key/value).
+// Value pointers are borrowed only for this callback; never reenter the module.
+typedef
+_Function_class_(EVT_DMF_HashTable_Remove)
+_IRQL_requires_max_(DISPATCH_LEVEL)
+_IRQL_requires_same_
+BOOLEAN
+EVT_DMF_HashTable_Remove(_In_ DMFMODULE DmfModule,
+                         _In_opt_ VOID* CallbackContext,
+                         _In_reads_(KeyLength) UCHAR* Key,
+                         _In_ ULONG KeyLength,
+                         _In_reads_(ValueLength) UCHAR* Value,
+                         _In_ ULONG ValueLength);
+
+// Client uses this structure to configure the Module specific parameters.
 //
 typedef struct
 {
@@ -154,6 +170,38 @@ DMF_HashTable_Write(
     _In_reads_(ValueLength) UCHAR* Value,
     _In_ ULONG ValueLength
     );
+
+// Like FindEx, but never allocates an entry for a missing key. The callback
+// runs under the table lock; borrowed value storage must not escape it.
+_IRQL_requires_max_(DISPATCH_LEVEL)
+_Must_inspect_result_
+NTSTATUS
+DMF_HashTable_FindExistingEx(_In_ DMFMODULE DmfModule,
+                           _In_reads_(KeyLength) UCHAR* Key,
+                           _In_ ULONG KeyLength,
+                           _In_ EVT_DMF_HashTable_FindEx* CallbackFindEx,
+                           _In_ VOID* CallbackContext);
+
+// Removes one key and immediately reclaims its capacity. NOT_FOUND does not
+// allocate or modify an entry. No payload ownership/destructor is implied.
+_IRQL_requires_max_(DISPATCH_LEVEL)
+_Must_inspect_result_
+NTSTATUS
+DMF_HashTable_Remove(_In_ DMFMODULE DmfModule,
+                   _In_reads_(KeyLength) UCHAR* Key,
+                   _In_ ULONG KeyLength);
+
+// Atomic conditional removal. A NULL predicate means unconditional removal.
+// Native pointer-valued consumers should compare their expected object here
+// before deleting it outside the table lock, avoiding stale-key removal races.
+_IRQL_requires_max_(DISPATCH_LEVEL)
+_Must_inspect_result_
+NTSTATUS
+DMF_HashTable_RemoveEx(_In_ DMFMODULE DmfModule,
+                     _In_reads_(KeyLength) UCHAR* Key,
+                     _In_ ULONG KeyLength,
+                     _In_opt_ EVT_DMF_HashTable_Remove* CallbackRemove,
+                     _In_opt_ VOID* CallbackContext);
 
 // eof: Dmf_HashTable.h
 //

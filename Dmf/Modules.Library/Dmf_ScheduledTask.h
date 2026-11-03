@@ -172,5 +172,15 @@ DMF_ScheduledTask_TimesRunSet(
     _In_ ULONG TimesRun
     );
 
+// Reusable on-demand join: close all deferred producers before invoking and
+// retain the module through return. Not callable from its callback or while
+// holding callback-required locks. Does not join timer/synchronous execution,
+// cancel the scheduler, or prevent later deferred submissions. SUCCESS proves
+// this admitted on-demand generation returned; BUSY is not a retirement proof.
+_IRQL_requires_max_(PASSIVE_LEVEL)
+_Must_inspect_result_
+NTSTATUS
+DMF_ScheduledTask_DeferredJoin(_In_ DMFMODULE DmfModule);
+
 // eof: Dmf_ScheduledTask.h
 //

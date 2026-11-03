@@ -110,5 +110,16 @@ DMF_QueuedWorkItem_StatusSet(
     _In_ NTSTATUS NtStatus
     );
 
+// Reusable callback/buffer-reuse join. Caller closes Enqueue/EnqueueAndWait
+// producers and retains the module through return. Never invoke from its work
+// callback or holding its locks. No cancellation or automatic rescheduling.
+// SUCCESS confirms no descriptor remains; BUSY may include an orphan descriptor
+// from failed scheduling and must not authorize storage reuse. Flush retains
+// its existing terminal cancellation behavior.
+_IRQL_requires_max_(PASSIVE_LEVEL)
+_Must_inspect_result_
+NTSTATUS
+DMF_QueuedWorkItem_Drain(_In_ DMFMODULE DmfModule);
+
 // eof: Dmf_QueuedWorkItem.h
 //

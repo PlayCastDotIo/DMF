@@ -1342,5 +1342,7 @@ Return Value:
     return requestContext->Timestamp;
 }
 
+#include "Dmf_NotifyUserWithRequest.CancelAndJoin.h"
+
 // eof: Dmf_NotifyUserWithRequest.c
 //

@@ -33,6 +33,11 @@ into a removed slot and repairing its hash/collision link. It allocates no new
 memory, preserves fixed capacity and scrubs the vacated slot. The custom hash
 callback must remain consistent for stored keys, as required by existing reads.
 
+Removal link rediscovery validates indices and visits at most the allocated
+entry count. If a required link cannot be found within that bound, removal
+returns `STATUS_INVALID_DEVICE_STATE` before modifying entries. This bounds
+cyclic-chain traversal; it does not repair corrupted table storage.
+
 Host contracts compile the complete production module with injected DMF/WDF
 boundaries and exercise its public APIs. They cover all deletion orders with
 default hashing and forced collisions, enumeration and read preservation,

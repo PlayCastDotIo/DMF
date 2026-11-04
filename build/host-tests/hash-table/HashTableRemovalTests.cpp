@@ -51,6 +51,31 @@ public:
                 std::memcpy(bytes, &current, sizeof(current));
             }, this);
     }
+    NTSTATUS RemoveWithInjectedChainFault(ULONG key, ULONG head, std::array<ULONG, 4> next) {
+        // Simulate damaged framework-owned storage after the public lookup but
+        // before removal. Do not call the private traversal helper directly.
+        auto* context = DMF_CONTEXT_GET(module);
+        const auto savedHead = context->HashMap[0];
+        std::array<ULONG, 4> savedNext{};
+        for (ULONG i = 0; i < 4; ++i)
+            savedNext[i] = HashTable_IndexToDataEntry(context, i)->NextEntryIndex;
+        struct Fault { ULONG head; std::array<ULONG, 4> next; } fault{head, next};
+        const auto status = DMF_HashTable_RemoveEx(module, reinterpret_cast<UCHAR*>(&key), sizeof(key),
+            [](DMFMODULE handle, VOID* injected, UCHAR*, ULONG, UCHAR*, ULONG) -> BOOLEAN {
+                auto* storage = DMF_CONTEXT_GET(handle);
+                const auto& damage = *static_cast<Fault*>(injected);
+                storage->HashMap[0] = damage.head;
+                for (ULONG i = 0; i < 4; ++i)
+                    HashTable_IndexToDataEntry(storage, i)->NextEntryIndex = damage.next[i];
+                return TRUE;
+            }, &fault);
+        // Restore only the injected links; public reads/removal below verify
+        // that the rejected operation did not modify values or reclaim entries.
+        context->HashMap[0] = savedHead;
+        for (ULONG i = 0; i < 4; ++i)
+            HashTable_IndexToDataEntry(context, i)->NextEntryIndex = savedNext[i];
+        return status;
+    }
     std::map<ULONG, ULONG> Enumerate() {
         std::map<ULONG, ULONG> values;
         DMF_HashTable_Enumerate(module,
@@ -130,12 +155,33 @@ void ModelAgreesAcrossMixedRemovalsAndReplacementWrites() {
             Expect(table.Read(present, &actual) == STATUS_SUCCESS && actual == value, "model read after compaction");
     }
 }
+void CorruptRemovalChainsFailWithoutChangingEntries() {
+    const std::array<std::pair<ULONG, std::array<ULONG, 4>>, 5> faults{{
+        {1, {1, 1, 3, INVALID_INDEX}}, // Self-cycle hides the selected entry.
+        {1, {1, 2, 1, INVALID_INDEX}}, // Multiple-node cycle hides it.
+        {4, {1, 2, 3, INVALID_INDEX}}, // Bucket head is outside allocated entries.
+        {1, {1, 4, 3, INVALID_INDEX}}, // A next link is outside allocated entries.
+        {0, {1, 2, 1, INVALID_INDEX}}, // Selected entry exists; compaction target is hidden.
+    }};
+    for (const auto& [head, next] : faults) {
+        ++scenarios; Table table(true); std::map<ULONG, ULONG> expected;
+        for (ULONG key = 1; key <= 4; ++key) {
+            Expect(table.Write(key, key + 10) == STATUS_SUCCESS, "corruption fixture write");
+            expected[key] = key + 10;
+        }
+        Expect(table.RemoveWithInjectedChainFault(1, head, next) == STATUS_INVALID_DEVICE_STATE,
+            "cyclic or out-of-range removal chain rejects without hanging");
+        Expect(table.Enumerate() == expected, "failed removal preserves all entries and values");
+        Expect(table.Remove(1) == STATUS_SUCCESS, "rejected removal releases the lock");
+    }
+}
 }
 int RunHashTableRemovalTests() {
     EveryRemovalOrder(false); EveryRemovalOrder(true);
     MissingLookupsDoNotReserveEntries(); ConditionalRemovalPreservesReplacement();
     ReclaimedSlotsSupportDistinctKeys(); ExistingCallbacksRemainSerialized();
     ModelAgreesAcrossMixedRemovalsAndReplacementWrites();
+    CorruptRemovalChainsFailWithoutChangingEntries();
     std::printf("HashTable: %u contract scenarios, %u failures\n", scenarios, failures.load());
     return failures ? 1 : 0;
 }

@@ -5,9 +5,15 @@
 static ULONG*
 HashTable_EntryLinkFind(DMF_CONTEXT_HashTable* ModuleContext, ULONG_PTR Hash, ULONG EntryIndex)
 {
+    ULONG remaining = ModuleContext->DataEntriesAllocated;
+    if (EntryIndex >= remaining) return NULL;
     ULONG* link = &ModuleContext->HashMap[Hash % ModuleContext->HashMapSize];
     while (*link != INVALID_INDEX && *link != EntryIndex)
     {
+        // A valid chain visits at most every allocated entry once. Bound the
+        // walk so a cycle or invalid index fails before dereferencing storage.
+        if (*link >= ModuleContext->DataEntriesAllocated || remaining == 0) return NULL;
+        --remaining;
         link = &HashTable_IndexToDataEntry(ModuleContext, *link)->NextEntryIndex;
     }
     return *link == EntryIndex ? link : NULL;

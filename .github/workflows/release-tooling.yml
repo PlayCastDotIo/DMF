@@ -1,0 +1,22 @@
+name: Release tooling contracts
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/build-artifacts.yml'
+      - '.github/workflows/pack-and-release.yml'
+      - '.github/workflows/release-tooling.yml'
+      - 'build/*Release*'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  contracts:
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - name: Test tag, source and archive contracts without publishing
+        shell: pwsh
+        run: ./build/Test-Release.ps1

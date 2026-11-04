@@ -140,5 +140,19 @@ DMF_NotifyUserWithRequest_RequestTimestampGet(
     _In_ WDFREQUEST Request
     );
 
+// Terminal queue cancellation and request/cancellation-callback join. Serialize
+// calls, retain this module, and first close/join every add, retrieval and data
+// producer. Callbacks must eventually complete captured requests without locks
+// held by the caller. Never call from a callback of this queue or from any WDF
+// request-dispatch callback. Does not join client deferred actors after native
+// completion; callers must join those separately before disposing their context.
+// The queue remains purged; existing Close/ReturnAll behavior is unchanged.
+_IRQL_requires_max_(PASSIVE_LEVEL)
+_Must_inspect_result_
+NTSTATUS
+DMF_NotifyUserWithRequest_EventRequestCancelAndJoin(
+    _In_ DMFMODULE DmfModule
+    );
+
 // eof: Dmf_NotifyUserWithRequest.h
 //

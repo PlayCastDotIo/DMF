@@ -1,0 +1,26 @@
+name: Notification request accounting
+
+on:
+  pull_request:
+    paths:
+      - 'Dmf/Modules.Library/Dmf_NotifyUserWithRequest.c'
+      - 'build/Test-NotifyRequestAccounting.ps1'
+      - 'build/host-tests/**'
+      - '.github/workflows/notify-request-accounting.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  accounting:
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: [Debug, Release]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Build and run host contracts
+        shell: pwsh
+        run: ./build/Test-NotifyRequestAccounting.ps1 -Configuration ${{ matrix.configuration }}

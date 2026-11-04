@@ -1003,6 +1003,9 @@ Return Value:
         if (!NT_SUCCESS(ntStatus))
         {
             TraceEvents(TRACE_LEVEL_ERROR, DMF_TRACE, "WdfObjectAllocateContext fails: ntStatus=%!STATUS!", ntStatus);
+            // No request was queued, so release the reserved pending slot.
+            //
+            InterlockedDecrement(&moduleContext->EventCountHeld);
             goto Exit;
         }
 
@@ -1021,6 +1024,10 @@ Return Value:
     else
     {
         TraceEvents(TRACE_LEVEL_ERROR, DMF_TRACE, "Unable to enqueue Request=%p ntStatus=%!STATUS!", Request, ntStatus);
+        // Forwarding failed without transferring ownership to the queue. A
+        // queue cancellation/return callback will not release this reservation.
+        //
+        InterlockedDecrement(&moduleContext->EventCountHeld);
     }
 
 Exit:

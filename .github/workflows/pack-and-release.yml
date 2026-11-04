@@ -47,7 +47,9 @@ jobs:
         run: ./build/Resolve-ReleaseSource.ps1 -RunId $env:SOURCE_RUN_ID -Tag $env:RELEASE_TAG
       - name: Retain packaging tooling across source checkout
         shell: pwsh
-        run: Copy-Item -LiteralPath ./build/New-ReleaseArchives.ps1 -Destination (Join-Path $env:RUNNER_TEMP 'Dmf-NewReleaseArchives.ps1') -ErrorAction Stop
+        run: |
+          Copy-Item -LiteralPath ./build/New-ReleaseArchives.ps1 -Destination (Join-Path $env:RUNNER_TEMP 'Dmf-NewReleaseArchives.ps1') -ErrorAction Stop
+          Copy-Item -LiteralPath ./build/ReleasePolicy.psm1 -Destination (Join-Path $env:RUNNER_TEMP 'Dmf-ReleasePolicy.psm1') -ErrorAction Stop
       - name: Checkout matching source headers
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
@@ -74,10 +76,9 @@ jobs:
           EXPECTED_SHA: ${{ steps.source.outputs.head_sha }}
         run: |
           $ErrorActionPreference = 'Stop'
-          git fetch --no-tags origin "refs/tags/$env:RELEASE_TAG"
-          if ($LASTEXITCODE) { throw 'Release tag is no longer available.' }
-          $tagCommit = git rev-parse --verify 'FETCH_HEAD^{commit}'
-          if ($LASTEXITCODE -or $tagCommit -cne $env:EXPECTED_SHA) { throw 'Release tag moved after source validation.' }
+          Import-Module (Join-Path $env:RUNNER_TEMP 'Dmf-ReleasePolicy.psm1') -Force
+          $tagCommit = Get-DmfRemoteTagCommit -Repository $env:GITHUB_REPOSITORY -Tag $env:RELEASE_TAG
+          if ($tagCommit -cne $env:EXPECTED_SHA) { throw 'Release tag moved after source validation.' }
           $archives = @(Get-ChildItem -LiteralPath .output/release-archives -File -Filter '*.zip' | ForEach-Object FullName)
           if ($archives.Count -ne 9) { throw 'Expected all nine release archives.' }
           gh release create $env:RELEASE_TAG @archives --repo $env:GITHUB_REPOSITORY --verify-tag --title "DMF $env:RELEASE_TAG" --generate-notes --latest

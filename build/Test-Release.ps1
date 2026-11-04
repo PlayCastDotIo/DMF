@@ -17,7 +17,7 @@ foreach ($tag in @('1.1.159','v01.1.159','v1.1.159-playcast.0','v1.1.159-playcas
     Reject { Get-DmfReleaseTag $tag } "Invalid tag rejected: $tag"
 }
 function New-Run {
-    [pscustomobject]@{ id=42; path='.github/workflows/build-artifacts.yml'; event='push'; head_sha=('a'*40)
+    [pscustomobject]@{ id=42; path='.github/workflows/build-artifacts.yml@main'; event='push'; head_sha=('a'*40)
         status='completed'; conclusion='success'; repository=@{full_name='PlayCastDotIo/DMF'}; head_repository=@{full_name='PlayCastDotIo/DMF'} }
 }
 $source = @{ RunId='42'; Repository='PlayCastDotIo/DMF'; Tag='v1.1.159-playcast.1'; TagCommit=('a'*40) }
@@ -26,6 +26,15 @@ Assert $true 'Successful manual recovery accepted'
 $active = New-Run; $active.status='in_progress'; $active.conclusion=$null
 Assert-DmfReleaseSource -Run $active @source -Automatic -CurrentRunId '42' -CurrentTag $source.Tag
 Assert $true 'Own active automatic tag run accepted'
+foreach ($path in @('.github/workflows/build-artifacts.yml', '.github/workflows/build-artifacts.yml@refs/tags/v1.1.159-playcast.1')) {
+    $run = New-Run; $run.path=$path
+    Assert-DmfReleaseSource -Run $run @source
+    Assert $true "Supported workflow path: $path"
+}
+foreach ($path in @('.github/workflows/build-artifacts.yml@', '.github/workflows/build-artifacts.yml.other@main', 'elsewhere/.github/workflows/build-artifacts.yml@main', ".github/workflows/build-artifacts.yml@main`n")) {
+    $run = New-Run; $run.path=$path
+    Reject { Assert-DmfReleaseSource -Run $run @source } "Invalid workflow path: $path"
+}
 foreach ($change in @(
     @{field='status';value='in_progress'}, @{field='conclusion';value='failure'},
     @{field='conclusion';value='cancelled'}, @{field='conclusion';value='skipped'},
@@ -42,6 +51,28 @@ Reject { Assert-DmfReleaseSource -Run $run @source } 'Foreign source repository 
 Reject { Assert-DmfReleaseSource -Run $active @source -Automatic -CurrentRunId '43' -CurrentTag $source.Tag } 'Different active run rejected'
 Reject { Assert-DmfReleaseSource -Run $active @source -Automatic -CurrentRunId '42' -CurrentTag 'v1.1.159' } 'Different automatic tag rejected'
 Reject { Assert-DmfReleaseSource -Run (New-Run) @source -Automatic -CurrentRunId '42' -CurrentTag $source.Tag } 'Completed source cannot impersonate active automatic run'
+
+$remote = @{Repository='PlayCastDotIo/DMF';Tag='v1.1.159-playcast.1'}
+$lightweight = {
+    param($path)
+    Assert ($path -ceq 'repos/PlayCastDotIo/DMF/git/ref/tags/v1.1.159-playcast.1') 'Exact tag endpoint used'
+    [pscustomobject]@{ref='refs/tags/v1.1.159-playcast.1';object=@{type='commit';sha=('a'*40)}}
+}
+Assert ((Get-DmfRemoteTagCommit @remote -ReadApi $lightweight) -ceq ('a'*40)) 'Lightweight tag resolves to commit'
+$annotated = {
+    param($path)
+    if ($path -ceq 'repos/PlayCastDotIo/DMF/git/ref/tags/v1.1.159-playcast.1') {
+        return [pscustomobject]@{ref='refs/tags/v1.1.159-playcast.1';object=@{type='tag';sha=('b'*40)}}
+    }
+    Assert ($path -ceq ('repos/PlayCastDotIo/DMF/git/tags/'+('b'*40))) 'Annotated tag object endpoint used'
+    [pscustomobject]@{object=@{type='commit';sha=('a'*40)}}
+}
+Assert ((Get-DmfRemoteTagCommit @remote -ReadApi $annotated) -ceq ('a'*40)) 'Annotated tag resolves to commit'
+Reject { Get-DmfRemoteTagCommit @remote -ReadApi { throw 'API failure' } } 'Remote API errors reject release'
+Reject { Get-DmfRemoteTagCommit @remote -ReadApi { [pscustomobject]@{ref='refs/heads/v1.1.159-playcast.1';object=@{type='commit';sha=('a'*40)}} } } 'Branch cannot substitute for tag'
+Reject { Get-DmfRemoteTagCommit @remote -ReadApi { [pscustomobject]@{ref='refs/tags/v1.1.159-playcast.1';object=@{type='commit';sha='invalid'}} } } 'Malformed remote SHA rejected'
+Reject { Get-DmfRemoteTagCommit @remote -ReadApi { [pscustomobject]@{ref='refs/tags/v1.1.159-playcast.1';object=@{type='tree';sha=('a'*40)}} } } 'Non-commit tag target rejected'
+Reject { Get-DmfRemoteTagCommit @remote -ReadApi { [pscustomobject]@{ref='refs/tags/v1.1.159-playcast.1';object=@{type='tag';sha=('b'*40)}} } } 'Unbounded annotated tag chain rejected'
 
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) ('dmf-release-tests-'+[guid]::NewGuid().ToString('N'))
 $null = New-Item -ItemType Directory -Path $testRoot

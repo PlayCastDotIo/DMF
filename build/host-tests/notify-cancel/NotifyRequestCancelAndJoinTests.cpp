@@ -56,10 +56,15 @@ static NTSTATUS DMF_ModuleReference(DMFMODULE Module) {
     return Module->referenceStatus;
 }
 static void DMF_ModuleDereference(DMFMODULE Module) { ++Module->releases; }
+unsigned scenarios{};
+std::atomic<unsigned> failures{};
+static void Expect(bool Condition, const char* Label) {
+    if (!Condition) { ++failures; std::fprintf(stderr, "Notify cancel/join: %s\n", Label); }
+}
 static void WdfRequestComplete(WDFREQUEST Request, NTSTATUS Status) {
     auto* queue = Request->queue;
     std::lock_guard held(queue->gate);
-    if (Status != STATUS_CANCELLED) std::fprintf(stderr, "Unexpected cancellation status\n");
+    Expect(Status == STATUS_CANCELLED, "cancellation completion status");
     ++queue->completions; queue->completed = true; queue->changed.notify_all();
 }
 #include "NotifyRequestCancel.inc"
@@ -74,16 +79,13 @@ static void WdfIoQueuePurgeSynchronously(WDFQUEUE Queue) {
     }
 }
 #include "Dmf_NotifyUserWithRequest.CancelAndJoin.h"
-unsigned scenarios{}, failures{};
-static void Expect(bool Condition, const char* Label) {
-    if (!Condition) { ++failures; std::fprintf(stderr, "Notify cancel/join: %s\n", Label); }
-}
 static void Capture(DMFMODULE Module, WDFREQUEST Request, ULONG_PTR Context, NTSTATUS Status) {
     auto* queue = Request->queue;
     std::unique_lock held(queue->gate);
     ++queue->captures; queue->callbackEntered = true; queue->changed.notify_all();
-    if (Module != queue->module || Context != 0 || Status != STATUS_CANCELLED)
-        std::fprintf(stderr, "Unexpected capture metadata\n");
+    Expect(Module == queue->module, "capture module");
+    Expect(Context == 0, "capture context");
+    Expect(Status == STATUS_CANCELLED, "capture status");
     if (!queue->defer) {
         held.unlock(); WdfRequestComplete(Request, Status); held.lock();
     }
@@ -149,8 +151,8 @@ int RunNotifyRequestCancelAndJoinTests() {
     RejectedReference(); MissingQueue(); EmptyTerminalQueue(); PendingCancellation(false); PendingCancellation(true);
     WaitForDeferredCompletionOrCallbackReturn(false); WaitForDeferredCompletionOrCallbackReturn(true);
     ResidualAccountingRejectsRetirement();
-    std::printf("Notify cancel/join: %u contract scenarios, %u failures\n", scenarios, failures);
-    return failures ? 1 : 0;
+    std::printf("Notify cancel/join: %u contract scenarios, %u failures\n", scenarios, failures.load());
+    return failures.load() ? 1 : 0;
 }
 
 int main() { return RunNotifyRequestCancelAndJoinTests(); }

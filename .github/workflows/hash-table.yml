@@ -1,0 +1,25 @@
+name: hash-table host contracts
+on:
+  pull_request:
+    paths:
+      - 'Dmf/Modules.Library/Dmf_HashTable*'
+      - 'build/host-tests/hash-table/**'
+      - '.github/workflows/hash-table.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  contracts:
+    runs-on: windows-2022
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: [Debug, Release]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - name: Build and run host contracts
+        shell: pwsh
+        run: ./build/host-tests/hash-table/Test.ps1 -Configuration ${{ matrix.configuration }}

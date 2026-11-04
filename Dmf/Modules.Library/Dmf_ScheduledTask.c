@@ -1584,3 +1584,5 @@ Exit:
 
 // eof: Dmf_ScheduledTask.c
 //
+
+#include "Dmf_ScheduledTask.DeferredJoin.h"

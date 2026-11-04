@@ -1,0 +1,24 @@
+name: deferred-work host contracts
+on:
+  pull_request:
+    paths:
+      - 'Dmf/Modules.Library/Dmf_ScheduledTask*'
+      - 'Dmf/Modules.Library/Dmf_QueuedWorkItem*'
+      - 'build/host-tests/deferred-work/**'
+      - '.github/workflows/deferred-work.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  contracts:
+    runs-on: windows-2022
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: [Debug, Release]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Build and run host contracts
+        shell: pwsh
+        run: ./build/host-tests/deferred-work/Test.ps1 -Configuration ${{ matrix.configuration }}

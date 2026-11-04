@@ -16,9 +16,9 @@ First stop/join all forwarding, retrieval and data producers, serialize terminal
 calls, retain the module and use PASSIVE_LEVEL. Never invoke this API from a WDF
 request-dispatch callback or while holding a lock needed by cancellation. Client
 deferred actors must be joined separately before their context is released.
-Residual accounting returns busy, even if the native queue is empty. The separate
-enqueue-accounting fix in PR #10 prevents reservations leaking on failed adds;
-dependency releases using this API should include that fix too.
+Residual accounting returns busy, even if the native queue is empty. Failed
+request-context allocation and queue forwarding release their reserved slots
+without completing the caller-owned request.
 
 Eight host fault-injection scenarios compile the production cancellation callback
 and join implementation. They exercise reference failure, missing/empty queues,

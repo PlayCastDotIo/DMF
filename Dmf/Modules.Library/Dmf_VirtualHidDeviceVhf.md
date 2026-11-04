@@ -4,7 +4,7 @@
 
 #### Module Summary
 
-This Module serves as a "base class" for Virtual HID devices. The Parent of the instance of this Module exposes a virtual HID
+This Module serves as a "base class" for Virtual HID devices which uses VHF. The Parent of the instance of this Module exposes a virtual HID
 device.
 
 -----------------------------------------------------------------------------------------------------------------------------------
@@ -26,7 +26,6 @@ typedef struct
   USHORT VersionNumber;
   const UCHAR* HidReportDescriptor;
   ULONG HidReportDescriptorLength;
-  HID_DEVICE_ATTRIBUTES HidDeviceAttributes;
   EVT_VHF_ASYNC_OPERATION* IoctlCallback_IOCTL_HID_SET_FEATURE;
   EVT_VHF_ASYNC_OPERATION* IoctlCallback_IOCTL_HID_GET_FEATURE;
   EVT_VHF_ASYNC_OPERATION* IoctlCallback_IOCTL_HID_GET_INPUT_REPORT;
@@ -46,7 +45,6 @@ VendorId | The vendor id of the virtual HID device.
 ProductId | The product id of the virtual HID device.
 VersionNumber | The version number of the virtual HID device.
 HidReportDescriptor | The HID report descriptor of the Virtual Hid device.
-HidDeviceAttributes | The HID device attributes of the Virtual Hid device.
 IoctlCallback_IOCTL_HID_SET_FEATURE | VHF callback for IOCTL_HID_SET_FEATURE.
 IoctlCallback_IOCTL_HID_GET_FEATURE | VHF callback for IOCTL_HID_GET_FEATURE.
 IoctlCallback_IOCTL_HID_GET_INPUT_REPORT | VHF callback for IOCTL_HID_GET_INPUT_REPORT.
@@ -135,6 +133,14 @@ Remarks | * See MSDN VHF documentation for more information.
 #### Module Remarks
 
 * IMPORTANT: Vhf.sys must be set as a Lower Filter driver in the Client driver's INF file using the "LowerFilters" registry entry. Otherwise, the VHF API is not available and this Module's Open callback will fail.
+* IMPORTANT: Please see the DMF sample drivers' INF files for important settings needed for **Kernel-mode** VHF drivers.
+* IMPORTANT: Please see the DMF sample drivers' INF files for important settings needed for **User-mode** VHF drivers.
+* VHF does not support HID Device Strings. Use the legacy Virtual Hid Mini Device (DMF_VirtualHidMini) if you need to support HID Device Strings. 
+* VHF does not support HID_OUTPUT_REPORT. Use the legacy Virtual Hid Mini Device (DMF_VirtualHidMini) if you need to support HID_OUTPUT_REPORT.
+* Unlike all other callbacks in DMF, VHF callbacks to Client Module are not chained by this Module.
+All other callbacks in DMF from OS are received by Child Module and then chained to Client Module. 
+However, VHF callbacks are directly received by Client Module. This happens because the Client Module
+passes its DMFMODULE handle in the VhfClientContext. This is a bug but it it is too late to fix.
 
 -----------------------------------------------------------------------------------------------------------------------------------
 
@@ -145,10 +151,13 @@ Remarks | * See MSDN VHF documentation for more information.
 #### Examples
 
 * DMF_HidPortableDeviceButtons
+* DMF_VirtualHidKeyboard
 
 -----------------------------------------------------------------------------------------------------------------------------------
 
 #### To Do
+
+* Add Ex versions of the callbacks in this Module that chain callbacks.
 
 -----------------------------------------------------------------------------------------------------------------------------------
 

@@ -17,6 +17,12 @@ constexpr NTSTATUS STATUS_DELETE_PENDING = static_cast<NTSTATUS>(0xc0000056u);
 constexpr NTSTATUS STATUS_INVALID_DEVICE_STATE = static_cast<NTSTATUS>(0xc0000184u);
 constexpr NTSTATUS STATUS_DEVICE_BUSY = static_cast<NTSTATUS>(0x80000011u);
 #define NT_SUCCESS(Status) ((Status) >= 0)
+#ifndef _In_
+#define _In_
+#endif
+#ifndef _Must_inspect_result_
+#define _Must_inspect_result_
+#endif
 #define _IRQL_requires_max_(Level)
 #define PAGED_CODE() ((void)0)
 #define DMFMODULE_VALIDATE_IN_METHOD(...)
@@ -99,29 +105,32 @@ struct Fixture {
         queue.pending = true; module.context.EventCountHeld = 1;
         if (Configured) module.config.EvtPendingRequestsCancel = Capture;
     }
-    void Balanced() { Expect(module.references == module.releases, "module retained through join and released"); }
+    void Balanced(unsigned ExpectedReferences) {
+        Expect(module.references == ExpectedReferences, "expected module reference count");
+        Expect(module.releases == ExpectedReferences, "expected module release count");
+    }
 };
 static void RejectedReference() {
     ++scenarios; Fixture f; f.module.referenceStatus = STATUS_DELETE_PENDING;
     Expect(DMF_NotifyUserWithRequest_EventRequestCancelAndJoin(&f.module) == STATUS_DELETE_PENDING, "reference failure preserved");
-    Expect(f.queue.purges == 0, "failed reference does not touch queue"); f.Balanced();
+    Expect(f.queue.purges == 0, "failed reference does not touch queue"); f.Balanced(0);
 }
 static void MissingQueue() {
     ++scenarios; Fixture f; f.module.context.EventRequestQueue = nullptr;
     Expect(DMF_NotifyUserWithRequest_EventRequestCancelAndJoin(&f.module) == STATUS_INVALID_DEVICE_STATE, "missing queue rejects join");
-    Expect(f.queue.purges == 0, "missing queue is not purged"); f.Balanced();
+    Expect(f.queue.purges == 0, "missing queue is not purged"); f.Balanced(1);
 }
 static void EmptyTerminalQueue() {
     ++scenarios; Fixture f;
     Expect(DMF_NotifyUserWithRequest_EventRequestCancelAndJoin(&f.module) == STATUS_SUCCESS, "empty terminal join");
     Expect(DMF_NotifyUserWithRequest_EventRequestCancelAndJoin(&f.module) == STATUS_SUCCESS, "serialized repeated terminal join");
-    Expect(f.queue.purged && f.queue.purges == 2, "queue remains purged"); f.Balanced();
+    Expect(f.queue.purged && f.queue.purges == 2, "queue remains purged"); f.Balanced(2);
 }
 static void PendingCancellation(bool Configured) {
     ++scenarios; Fixture f; f.Pending(Configured);
     Expect(DMF_NotifyUserWithRequest_EventRequestCancelAndJoin(&f.module) == STATUS_SUCCESS, "pending request joined");
     Expect(f.queue.completions == 1 && f.queue.captures == unsigned(Configured), "configured capture or default completion exactly once");
-    Expect(f.queue.callbackReturned && f.module.context.EventCountHeld == 0, "cancellation accounting retired"); f.Balanced();
+    Expect(f.queue.callbackReturned && f.module.context.EventCountHeld == 0, "cancellation accounting retired"); f.Balanced(1);
 }
 static void WaitForDeferredCompletionOrCallbackReturn(bool HoldReturn) {
     ++scenarios; Fixture f; f.Pending(true); f.queue.defer = !HoldReturn; f.queue.holdReturn = HoldReturn;
@@ -139,12 +148,12 @@ static void WaitForDeferredCompletionOrCallbackReturn(bool HoldReturn) {
         f.queue.changed.notify_all();
     }
     Expect(joined.get() == STATUS_SUCCESS, "join after both barriers");
-    Expect(f.queue.completions == 1 && f.queue.captures == 1, "no retry or direct duplicate completion"); f.Balanced();
+    Expect(f.queue.completions == 1 && f.queue.captures == 1, "no retry or direct duplicate completion"); f.Balanced(1);
 }
 static void ResidualAccountingRejectsRetirement() {
     ++scenarios; Fixture f; f.module.context.EventCountHeld = 1;
     Expect(DMF_NotifyUserWithRequest_EventRequestCancelAndJoin(&f.module) == STATUS_DEVICE_BUSY, "residual accounting rejects success");
-    Expect(f.queue.purged && f.queue.completions == 0, "fault retains terminal queue without invented completion"); f.Balanced();
+    Expect(f.queue.purged && f.queue.completions == 0, "fault retains terminal queue without invented completion"); f.Balanced(1);
 }
 }
 int RunNotifyRequestCancelAndJoinTests() {

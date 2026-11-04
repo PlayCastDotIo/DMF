@@ -49,18 +49,16 @@ a published release. No tag or GitHub release is created by the offline tests:
 ./build/Test-Release.ps1
 ```
 
-## Repository tag protections (administrator setup)
+## Repository tag protections
+
+The active [Immutable DMF version tags ruleset](https://github.com/PlayCastDotIo/DMF/rules/26568871)
+blocks updates and deletion for `refs/tags/v*`, with no configured bypass.
+Tag creation remains governed by existing repository permissions; no separate
+creation restriction was approved or installed.
 
 The workflow SHA comparisons guard against stale runs and accidental tag movement;
-they do not enforce immutability or prevent a privileged user from changing a tag
-before a build. Configure platform rules separately, with explicit administrator
-approval. Recommended rules for `refs/tags/v*`:
-
-- An active tag ruleset blocks updates and deletion with no configured bypass.
-- A separate active creation ruleset permits only repository administrators to
-  create matching tags. Its administrator bypass applies only to creation, so it
-  cannot bypass the first ruleset's update/deletion restrictions.
-
-These protections are not installed by the release workflow or its PR. Repository
-administrators can still edit rulesets; control changes to those settings through
-the organization's administration process. Create a new tag/revision for repairs.
+they do not enforce immutability themselves. The ruleset was configured separately
+with administrator approval and is not installed by the release workflow.
+Repository administrators can still edit rulesets; control changes to those
+settings through the organization's administration process. Create a new
+tag/revision for repairs.

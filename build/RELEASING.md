@@ -62,3 +62,19 @@ with administrator approval and is not installed by the release workflow.
 Repository administrators can still edit rulesets; control changes to those
 settings through the organization's administration process. Create a new
 tag/revision for repairs.
+
+
+## Debug symbols
+
+DMF currently compiles with DebugInformationFormat=OldStyle (/Z7) in Debug
+and Release. CodeView symbols are embedded in the COFF objects in DmfK.lib
+and DmfU.lib; no separate compiler PDB is required. Consumer links with
+/DEBUG collect those symbols into their own output PDB. Keep the libraries
+from the exact architecture, OS and configuration being linked.
+
+Release archives preserve any companion .pdb files under the lib tree as
+well, beside their matching libraries, if a build emits them. Empty library
+or PDB files fail packaging. Archive names and directory layouts remain
+compatible. Do not substitute unrelated PDBs or require a nonexistent PDB
+for /Z7 builds. Offline contracts check both packaging without companion
+PDBs and byte-for-byte PDB retention across the complete matrix.

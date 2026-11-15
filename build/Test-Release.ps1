@@ -91,7 +91,7 @@ function New-Fixture([string]$Name, [switch]$Partial) {
         $directory = Join-Path $binaries "Bin_${os}_${platform}_${configuration}/lib/DmfK"
         $null = New-Item -ItemType Directory -Force -Path $directory
         [IO.File]::WriteAllText((Join-Path $directory 'DmfK.lib'), 'library fixture')
-        [IO.File]::WriteAllText((Join-Path $directory 'DmfK.pdb'), 'excluded symbols')
+        [IO.File]::WriteAllText((Join-Path $directory 'DmfK.pdb'), 'compiler symbols fixture')
     } } }
     return @{ SourceRoot=$sourceRoot; BinariesRoot=$binaries; OutputDirectory=(Join-Path $root 'archives') }
 }
@@ -111,7 +111,12 @@ try {
                 Assert (@($names | Where-Object { $_ -notlike '*.h' }).Count -eq 0) 'Only headers included'
             } else {
                 $drop = $archive.BaseName.Replace('_libs','')
-                Assert ($names.Count -eq 1 -and $names[0] -ceq "$drop/lib/DmfK/DmfK.lib") "Architecture layout retained: $drop"
+                Assert ($names.Count -eq 2 -and $names -ccontains "$drop/lib/DmfK/DmfK.lib") "Architecture layout retained: $drop"
+                Assert ($names -ccontains "$drop/lib/DmfK/DmfK.pdb") "Companion symbols retained: $drop"
+                $entry = @($zip.Entries | Where-Object { $_.FullName.Replace([char]92,[char]47) -ceq "$drop/lib/DmfK/DmfK.pdb" })[0]
+                $reader = [IO.StreamReader]::new($entry.Open())
+                try { Assert ($reader.ReadToEnd() -ceq 'compiler symbols fixture') "Matching symbol bytes retained: $drop" }
+                finally { $reader.Dispose() }
             }
         } finally { $zip.Dispose() }
     }
@@ -121,6 +126,16 @@ try {
     $fixture = New-Fixture 'empty-library'
     Remove-Item -LiteralPath (Join-Path $fixture.BinariesRoot 'Bin_20H1_x64_Debug/lib/DmfK/DmfK.lib')
     Reject { & (Join-Path $PSScriptRoot 'New-ReleaseArchives.ps1') @fixture } 'Empty library artifact rejected'
+    $fixture = New-Fixture 'embedded-symbols'
+    Get-ChildItem -LiteralPath $fixture.BinariesRoot -Recurse -Filter '*.pdb' | Remove-Item
+    & (Join-Path $PSScriptRoot 'New-ReleaseArchives.ps1') @fixture
+    Assert (@(Get-ChildItem -LiteralPath $fixture.OutputDirectory -Filter '*.zip').Count -eq 9) '/Z7 libraries need no companion PDB'
+    foreach ($extension in @('lib','pdb')) {
+        $fixture = New-Fixture "empty-$extension-file"
+        [IO.File]::WriteAllBytes((Join-Path $fixture.BinariesRoot "Bin_24H2_arm64_Release/lib/DmfK/DmfK.$extension"), [byte[]]::new(0))
+        Reject { & (Join-Path $PSScriptRoot 'New-ReleaseArchives.ps1') @fixture } "Empty $extension rejected before publishing"
+        Assert (!(Test-Path -LiteralPath $fixture.OutputDirectory)) "Empty $extension leaves no partial archives"
+    }
     $fixture = New-Fixture 'missing-header'
     Remove-Item -LiteralPath (Join-Path $fixture.SourceRoot 'Dmf/Framework/fixture.h')
     Reject { & (Join-Path $PSScriptRoot 'New-ReleaseArchives.ps1') @fixture } 'Missing headers rejected'

@@ -17,6 +17,9 @@ if ($drops.Count -ne $expected.Count -or @($drops | Where-Object { $_.Name -cnot
 foreach ($name in $expected) {
     $lib = Join-Path $BinariesRoot "$name/lib"
     if (!(Test-Path -LiteralPath $lib) -or !(Get-ChildItem -LiteralPath $lib -Recurse -File -Filter '*.lib')) { throw "Missing libraries: $name" }
+    foreach ($file in Get-ChildItem -LiteralPath $lib -Recurse -File | Where-Object { $_.Extension -in @('.lib', '.pdb') }) {
+        if ($file.Length -eq 0) { throw "Empty library or symbols: $($file.FullName)" }
+    }
 }
 foreach ($folder in @('Dmf','Dmf/Framework','Dmf/Modules.Library','Dmf/Modules.Template')) {
     if (!(Get-ChildItem -LiteralPath (Join-Path $SourceRoot $folder) -File -Filter '*.h')) { throw "Missing headers: $folder" }
@@ -27,7 +30,8 @@ $null = New-Item -ItemType Directory -Path $staging
 foreach ($name in $expected) {
     $lib = Join-Path $BinariesRoot "$name/lib"
     $drop = Join-Path $staging $name
-    foreach ($file in Get-ChildItem -LiteralPath $lib -Recurse -File -Filter '*.lib') {
+    # /Z7 embeds symbols in each library; retain companion /Zi PDBs too if present.
+    foreach ($file in Get-ChildItem -LiteralPath $lib -Recurse -File | Where-Object { $_.Extension -in @('.lib', '.pdb') }) {
         $relative = [IO.Path]::GetRelativePath($lib, $file.FullName)
         $destination = Join-Path $drop "lib/$relative"
         $null = New-Item -ItemType Directory -Force -Path (Split-Path $destination)
